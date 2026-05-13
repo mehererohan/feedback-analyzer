@@ -28,9 +28,15 @@ with tab2:
     uploaded_file = st.file_uploader("Upload a CSV file", type="csv")
     if uploaded_file:
         df = pd.read_csv(uploaded_file)
+        df.index = df.index + 1
         st.write("Preview:", df.head())
-        column = st.selectbox("Which column contains the reviews?", df.columns)
+        if len(df.columns) == 1:
+            column = df.columns[0]
+        else:
+            column = st.selectbox("Which column contains the reviews?", df.columns)
         feedback = "\n".join(df[column].dropna().astype(str).tolist())
+
+review_count = len([r for r in feedback.strip().splitlines() if r.strip()])
 
 if st.button("Analyze"):
     if not feedback.strip():
@@ -47,7 +53,7 @@ if st.button("Analyze"):
 {{
   "summary": "2-3 sentence overall summary",
   "overall_sentiment": "positive|negative|neutral|mixed",
-  "review_count": <integer>,
+  "review_count": {review_count},
   "themes": [
     {{
       "title": "Theme name",
