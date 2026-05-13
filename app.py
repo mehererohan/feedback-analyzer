@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 import json
+import pandas as pd
 from groq import Groq
 from dotenv import load_dotenv
 
@@ -8,9 +9,6 @@ load_dotenv()
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 st.title("Customer Feedback Analyzer")
-st.write("Paste customer reviews below — one per line.")
-
-feedback = st.text_area("Customer feedback", height=200)
 
 SENTIMENT_COLORS = {
     "positive": "🟢",
@@ -19,9 +17,24 @@ SENTIMENT_COLORS = {
     "mixed": "🟠"
 }
 
+tab1, tab2 = st.tabs(["Paste text", "Upload CSV"])
+
+feedback = ""
+
+with tab1:
+    feedback = st.text_area("Paste reviews here — one per line", height=200)
+
+with tab2:
+    uploaded_file = st.file_uploader("Upload a CSV file", type="csv")
+    if uploaded_file:
+        df = pd.read_csv(uploaded_file)
+        st.write("Preview:", df.head())
+        column = st.selectbox("Which column contains the reviews?", df.columns)
+        feedback = "\n".join(df[column].dropna().astype(str).tolist())
+
 if st.button("Analyze"):
     if not feedback.strip():
-        st.warning("Please paste some feedback first.")
+        st.warning("Please paste some feedback or upload a CSV first.")
     else:
         with st.spinner("Analyzing..."):
             response = client.chat.completions.create(
@@ -48,7 +61,7 @@ if st.button("Analyze"):
 3-5 themes. JSON only.
 
 FEEDBACK:
-{feedback}"""
+{feedback[:8000]}"""
                     }
                 ]
             )
