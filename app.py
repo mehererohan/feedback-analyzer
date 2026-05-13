@@ -10,13 +10,15 @@ from groq import Groq
 from supabase import Client, create_client
 
 load_dotenv()
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+client = Groq(
+    api_key=os.getenv("GROQ_API_KEY") or st.secrets.get("GROQ_API_KEY", "")
+)
 
 
 @st.cache_resource
 def get_supabase() -> Optional[Client]:
-    url = (os.getenv("SUPABASE_URL") or "").strip()
-    key = (os.getenv("SUPABASE_KEY") or "").strip()
+    url = (os.getenv("SUPABASE_URL") or st.secrets.get("SUPABASE_URL", "")).strip()
+    key = (os.getenv("SUPABASE_KEY") or st.secrets.get("SUPABASE_KEY", "")).strip()
     if not url or not key:
         return None
     return create_client(url, key)
