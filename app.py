@@ -5,6 +5,7 @@ from typing import Any, Optional, Tuple
 
 import pandas as pd
 import plotly.graph_objects as go
+import requests
 import streamlit as st
 from collections import Counter
 from dotenv import load_dotenv
@@ -111,6 +112,73 @@ SENTIMENT_COLORS = {
     "neutral": "🟡",
     "mixed": "🟠",
 }
+
+
+def _slack_ts_display(value: Any) -> str:
+    if value is None:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    s = str(value).strip()
+    if not s:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    if "T" in s and s.endswith("Z"):
+        s = s[:-1] + " UTC"
+    elif len(s) >= 19 and "T" in s[:19]:
+        return s[:19].replace("T", " ") + " UTC"
+    return s
+
+
+def send_slack_analysis(data: dict, analysis_ts: Any) -> tuple[bool, str]:
+    webhook = (os.getenv("SLACK_WEBHOOK_URL") or st.secrets.get("SLACK_WEBHOOK_URL", "")).strip()
+    if not webhook:
+        return False, "Set **SLACK_WEBHOOK_URL** in your environment or `.env` file."
+
+    sentiment = (data.get("overall_sentiment") or "unknown").strip().lower()
+    score = SENTIMENT_SCORE.get(sentiment)
+    score_label = str(score) if score is not None else "—"
+    icon = SENTIMENT_COLORS.get(sentiment, "⚪")
+    themes = (data.get("themes") or [])[:3]
+    summary = (data.get("summary") or "").strip() or "—"
+    if len(summary) > 2000:
+        summary = summary[:1999] + "…"
+    ts_line = _slack_ts_display(analysis_ts)
+
+    theme_lines: list[str] = []
+    for i, theme in enumerate(themes, start=1):
+        t_sent = (theme.get("sentiment") or "—").strip().lower()
+        t_icon = SENTIMENT_COLORS.get(t_sent, "⚪")
+        title = (theme.get("title") or "Untitled").strip()
+        theme_lines.append(f"{i}. {t_icon} *{title}* — {t_sent}")
+    if not theme_lines:
+        theme_lines.append("_No themes in this analysis._")
+
+    mrkdwn = (
+        f"*Customer feedback analysis*\n\n"
+        f"*Overall sentiment:* {icon} `{sentiment}`  ·  *Score:* `{score_label}` "
+        f"(0=negative … 3=positive)\n\n"
+        f"*Top themes*\n" + "\n".join(theme_lines) + "\n\n"
+        f"*Summary*\n{summary}\n\n"
+        f"*Analysis time:* `{ts_line}`"
+    )
+
+    payload = {
+        "blocks": [
+            {"type": "section", "text": {"type": "mrkdwn", "text": mrkdwn}},
+        ]
+    }
+
+    try:
+        resp = requests.post(webhook, json=payload, timeout=15)
+    except requests.RequestException as exc:
+        return False, f"Request failed: {exc}"
+
+    if resp.status_code != 200:
+        return False, f"Slack returned HTTP {resp.status_code}: {resp.text[:500]}"
+
+    body = (resp.text or "").strip()
+    if body and body.lower() != "ok":
+        return False, f"Unexpected response: {body[:500]}"
+
+    return True, "Sent to Slack."
 
 
 def render_results(data: dict):
@@ -302,6 +370,7 @@ with st.sidebar:
                         "feedback": loaded["feedback_text"],
                         "loaded_id": loaded["id"],
                         "loaded_at": format_ts_short(loaded.get("created_at")),
+                        "analysis_timestamp": loaded.get("created_at"),
                     }
 
 st.title("Customer Feedback Analyzer")
@@ -384,6 +453,7 @@ FEEDBACK:
                         "feedback": feedback,
                         "loaded_id": None,
                         "loaded_at": None,
+                        "analysis_timestamp": datetime.now(timezone.utc).isoformat(),
                     }
                 except json.JSONDecodeError:
                     st.session_state.analysis_results = None
@@ -397,6 +467,17 @@ FEEDBACK:
             )
         st.markdown("---")
         st.markdown("## Results")
+        btn_col, _ = st.columns([1, 4])
+        with btn_col:
+            if st.button("Send to Slack", key="send_slack_results", use_container_width=True):
+                ok, slack_msg = send_slack_analysis(
+                    res["data"],
+                    res.get("analysis_timestamp"),
+                )
+                if ok:
+                    st.success(slack_msg)
+                else:
+                    st.error(slack_msg)
         render_results(res["data"])
 
 with tab_trends:
